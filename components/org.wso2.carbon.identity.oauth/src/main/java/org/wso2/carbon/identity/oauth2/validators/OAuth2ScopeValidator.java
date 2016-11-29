@@ -34,11 +34,12 @@ public abstract class OAuth2ScopeValidator {
      * Method to validate the scopes associated with the access token against the resource that is being accessed.
      *
      * @param accessTokenDO - The access token data object
-     * @param resource      - The resource that is being accessed.
+     * @param resourceScope      - The resourceScope that is associated with given resource
      * @return - true if scope is valid, false otherwise
      * @throws IdentityOAuth2Exception
      */
-    public abstract boolean validateScope(AccessTokenDO accessTokenDO, String resource) throws IdentityOAuth2Exception;
+    public abstract boolean validateScope(AccessTokenDO accessTokenDO, String resourceScope) throws
+            IdentityOAuth2Exception;
 
     public Set<String> getScopesToSkip() {
         return scopesToSkip;
