@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2013, WSO2 Inc. (http://www.wso2.org) All Rights Reserved.
+ * Copyright (c) 2016, WSO2 Inc. (http://www.wso2.org) All Rights Reserved.
  *
  * WSO2 Inc. licenses this file to you under the Apache License,
  * Version 2.0 (the "License"); you may not use this file except
@@ -28,8 +28,8 @@ import org.wso2.carbon.identity.oauth.internal.OAuthComponentServiceHolder;
 import org.wso2.carbon.identity.oauth2.IdentityOAuth2Exception;
 import org.wso2.carbon.identity.oauth2.dao.TokenMgtDAO;
 import org.wso2.carbon.identity.oauth2.model.AccessTokenDO;
+import org.wso2.carbon.user.api.AuthorizationManager;
 import org.wso2.carbon.user.api.UserStoreException;
-import org.wso2.carbon.user.api.UserStoreManager;
 import org.wso2.carbon.user.core.service.RealmService;
 import org.wso2.carbon.utils.multitenancy.MultitenantUtils;
 
@@ -38,18 +38,15 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Set;
 
+@SuppressWarnings("unused")
+public class PermissionBasedScopeValidator extends OAuth2ScopeValidator {
 
-/**
- * The JDBC Scope Validation implementation. This validates the Resource's scope (stored in IDN_OAUTH2_RESOURCE_SCOPE)
- * against the Access Token's scopes.
- */
-public class JDBCScopeValidator extends OAuth2ScopeValidator {
+    private static final Log log = LogFactory.getLog(PermissionBasedScopeValidator.class);
+    private static final String UI_EXECUTE = "ui.execute";
 
-    Log log = LogFactory.getLog(JDBCScopeValidator.class);
 
     @Override
     public boolean validateScope(AccessTokenDO accessTokenDO, String resourceScope) throws IdentityOAuth2Exception {
-
         //Get the list of scopes associated with the access token
         String[] scopes = accessTokenDO.getScope();
 
@@ -66,17 +63,17 @@ public class JDBCScopeValidator extends OAuth2ScopeValidator {
         if(!scopeList.contains(resourceScope)){
             if(log.isDebugEnabled()){
                 log.debug("Access token '" + accessTokenDO.getAccessToken() + "' does not bear the scope '" +
-                            resourceScope + "'");
+                        resourceScope + "'");
             }
             return false;
         }
 
         try {
-            //Get the roles associated with the scope, if any
-            Set<String> rolesOfScope = tokenMgtDAO.getRolesOfScopeByScopeKey(resourceScope);
+            //Get the permissions associated with the scope, if any
+            Set<String> permissionsOfScope = tokenMgtDAO.getRolesOfScopeByScopeKey(resourceScope);
 
-            //If the scope doesn't have any roles associated with it.
-            if(rolesOfScope == null || rolesOfScope.isEmpty()){
+            //If the scope doesn't have any permissions associated with it.
+            if(permissionsOfScope == null || permissionsOfScope.isEmpty()){
                 if(log.isDebugEnabled()){
                     log.debug("Did not find any roles associated to the scope " + resourceScope);
                 }
@@ -84,25 +81,24 @@ public class JDBCScopeValidator extends OAuth2ScopeValidator {
             }
 
             if(log.isDebugEnabled()){
-                StringBuilder logMessage = new StringBuilder("Found roles of scope '" + resourceScope + "' ");
-                for(String role : rolesOfScope){
-                    logMessage.append(role);
+                StringBuilder logMessage = new StringBuilder("Found permissions of scope '" + resourceScope + "' ");
+                for(String permission : permissionsOfScope){
+                    logMessage.append(permission);
                     logMessage.append(", ");
                 }
                 log.debug(logMessage.toString());
             }
 
-            User authzUser = accessTokenDO.getAuthzUser();
+            User authorizedUser = accessTokenDO.getAuthzUser();
             RealmService realmService = OAuthComponentServiceHolder.getInstance().getRealmService();
 
-            int tenantId = realmService.getTenantManager().
-                    getTenantId(authzUser.getTenantDomain());
+            int tenantId = realmService.getTenantManager().getTenantId(authorizedUser.getTenantDomain());
 
             if (tenantId == 0 || tenantId == -1) {
-                tenantId = IdentityTenantUtil.getTenantIdOfUser(authzUser.getUserName());
+                tenantId = IdentityTenantUtil.getTenantIdOfUser(authorizedUser.getUserName());
             }
 
-            UserStoreManager userStoreManager;
+            AuthorizationManager authorizationManager;
             String[] userRoles;
             boolean tenantFlowStarted = false;
 
@@ -111,40 +107,46 @@ public class JDBCScopeValidator extends OAuth2ScopeValidator {
                 if(tenantId != MultitenantConstants.SUPER_TENANT_ID){
                     PrivilegedCarbonContext.startTenantFlow();
                     PrivilegedCarbonContext.getThreadLocalCarbonContext().setTenantDomain(
-                                                            realmService.getTenantManager().getDomain(tenantId),true);
+                            realmService.getTenantManager().getDomain(tenantId),true);
                     tenantFlowStarted = true;
                 }
 
-                userStoreManager = realmService.getTenantUserRealm(tenantId).getUserStoreManager();
-                userRoles = userStoreManager.getRoleListOfUser(
-                        MultitenantUtils.getTenantAwareUsername(authzUser.getUserName()));
+                authorizationManager = realmService.getTenantUserRealm(tenantId).getAuthorizationManager();
+
             } finally {
                 if (tenantFlowStarted) {
                     PrivilegedCarbonContext.endTenantFlow();
                 }
             }
+            boolean status = false;
+            String username = MultitenantUtils.getTenantAwareUsername(authorizedUser.getUserName());
+            for (String permission : permissionsOfScope) {
+                if (authorizationManager != null) {
+                    String userStore = authorizedUser.getUserStoreDomain();
 
-            if(userRoles != null && userRoles.length > 0){
-                if(log.isDebugEnabled()){
-                    StringBuilder logMessage = new StringBuilder("Found roles of user ");
-                    logMessage.append(authzUser.getUserName());
-                    logMessage.append(" ");
-                    for(String role : userRoles){
-                        logMessage.append(role);
-                        logMessage.append(", ");
+                    if (userStore != null) {
+                        status = authorizationManager
+                                .isUserAuthorized(userStore + "/" + username, permission, UI_EXECUTE);
+                    } else {
+                        status = authorizationManager.isUserAuthorized(username , permission, UI_EXECUTE);
                     }
-                    log.debug(logMessage.toString());
+                    if (status) {
+                        break;
+                    }
                 }
-                //Check if the user still has a valid role for this scope.
-                rolesOfScope.retainAll(Arrays.asList(userRoles));
-                return !rolesOfScope.isEmpty();
             }
-            else{
+
+            if (status) {
                 if(log.isDebugEnabled()){
-                    log.debug("No roles associated for the user " + authzUser.getUserName());
+                    log.debug("User '" + authorizedUser.getUserName() + "' is authorized");
                 }
-                return false;
+                return true;
             }
+
+            if(log.isDebugEnabled()){
+                log.debug("No permissions associated for the user " + authorizedUser.getUserName());
+            }
+            return false;
 
         } catch (UserStoreException e) {
             //Log and return since we do not want to stop issuing the token in case of scope validation failures.
@@ -152,4 +154,5 @@ public class JDBCScopeValidator extends OAuth2ScopeValidator {
             return false;
         }
     }
+
 }
