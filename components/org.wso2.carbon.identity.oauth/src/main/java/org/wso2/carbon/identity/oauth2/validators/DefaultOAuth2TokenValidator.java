@@ -62,7 +62,8 @@ public class DefaultOAuth2TokenValidator implements OAuth2TokenValidator {
             //Return True if there is no resource to validate the token against
             //OR if the token has a valid scope to access the resource. False otherwise.
             return resource == null ||
-                    ScopeValidator.validateScope((AccessTokenDO) messageContext.getProperty("AccessTokenDO"), resource);
+                    ScopeValidator.getInstance().validateScope((AccessTokenDO) messageContext.
+                            getProperty("AccessTokenDO"), resource);
         }
         return true;
     }

@@ -33,14 +33,14 @@ import java.util.Map;
 public class ScopeValidator {
 
     private final static Log log = LogFactory.getLog(ScopeValidator.class);
-    private static Map<String, OAuth2ScopeValidator> scopeValidators;
+    private Map<String, OAuth2ScopeValidator> scopeValidators;
     private static ScopeValidator instance;
 
-    private final static String DEFAULT_PREFIX = "default";
+    private final String DEFAULT_PREFIX = "default";
 
     private ScopeValidator() {
         OAuthServerConfiguration serverConfig = OAuthServerConfiguration.getInstance();
-        scopeValidators = serverConfig.getoAuth2ScopeValidators();
+        scopeValidators = serverConfig.getOAuth2ScopeValidators();
     }
 
     public static ScopeValidator getInstance() {
@@ -91,7 +91,7 @@ public class ScopeValidator {
         return scopeValidator.validateScope(accessTokenDO, resourceScope);
     }
 
-    private static String getResourceScope(String resource) {
+    private String getResourceScope(String resource) {
 
         String resourceScope = null;
         boolean cacheHit = false;
